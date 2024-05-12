@@ -8,54 +8,54 @@ import io from 'socket.io-client';
 const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'http://localhost:8080';
 const SOCKET_PATH = process.env.REACT_APP_SOCKET_PATH || '/socket.io';
 
-const socket = io(SERVER_URL, { path: SOCKET_PATH });
+const documentSocket = io(SERVER_URL, { path: SOCKET_PATH });
 
-const socketIoPlugin = createSocketIoPlugin({
-  socket: socket,
+const documentEditSocketPlugin = createSocketIoPlugin({
+  socket: documentSocket,
   onSave: (editorState: EditorState) => {
-    const content = editorState.getCurrentContent();
-    socket.emit('save-document', JSON.stringify(convertToRaw(content)));
+    const contentState = editorState.getCurrentContent();
+    documentSocket.emit('save-document', JSON.stringify(convertToRaw(contentState)));
   },
   onEdit: (editorState: EditorState) => {
-    const content = editorState.getCurrentContent();
-    socket.emit('edit-document', JSON.stringify(convertToRaw(content)));
+    const contentState = editorState.getCurrentContent();
+    documentSocket.emit('edit-document', JSON.stringify(convertToRaw(contentState)));
   }
 });
 
-const plugins = [socketIoPlugin];
+const editorPlugins = [documentEditSocketPlugin];
 
 const DocumentEditor: React.FC = () => {
-  const editor = useRef<Editor>(null);
-  const [editorState, setEditorState] = useState(() => EditorState.createEmpty());
+  const editorRef = useRef<Editor>(null);
+  const [currentEditorState, setCurrentEditorState] = useState(() => EditorState.createEmpty());
 
   useEffect(() => {
-    socket.emit('load-document');
-    socket.on('document', (doc: string) => {
-      const contentState = convertFromRaw(JSON.parse(doc));
-      setEditorState(EditorState.createWithContent(contentState));
+    documentSocket.emit('load-document');
+    documentSocket.on('document', (documentContent: string) => {
+      const contentFromRaw = convertFromRaw(JSON.parse(documentContent));
+      setCurrentEditorState(EditorState.createWithContent(contentFromRaw));
     });
 
     return () => {
-      socket.off('document');
+      documentSocket.off('document');
     };
   }, []);
 
   useEffect(() => {
-    if (editor.current) editor.current.focus();
+    if (editorRef.current) editorRef.current.focus();
   }, []);
 
-  const onChange = (newEditorState: EditorState) => {
-    setEditorState(newEditorState);
+  const handleEditorChange = (newEditorState: EditorState) => {
+    setCurrentEditorState(newEditorState);
   };
 
   return (
     <div style={{ padding: '20px' }}>
       <Editor
         editorKey="document-editor"
-        editorState={editorState}
-        onChange={onChange}
-        plugins={plugins}
-        ref={editor}
+        editorState={currentEditorState}
+        onChange={handleEditorChange}
+        plugins={editorPlugins}
+        ref={editorRef}
       />
     </div>
   );
