@@ -13,12 +13,20 @@ const documentSocket = io(SERVER_URL, { path: SOCKET_PATH });
 const documentEditSocketPlugin = createSocketIoPlugin({
   socket: documentSocket,
   onSave: (editorState: EditorState) => {
-    const contentState = editorState.getCurrentContent();
-    documentSocket.emit('save-document', JSON.stringify(convertToRaw(contentState)));
+    try {
+      const contentState = editorState.getCurrentContent();
+      documentSocket.emit('save-document', JSON.stringify(convertToRaw(contentState)));
+    } catch (error) {
+      console.error("Failed to save document:", error);
+    }
   },
   onEdit: (editorState: EditorState) => {
-    const contentState = editorState.getCurrentContent();
-    documentSocket.emit('edit-document', JSON.stringify(convertToRaw(contentState)));
+    try {
+      const contentState = editorState.getCurrentContent();
+      documentSocket.emit('edit-document', JSON.stringify(convertToRaw(contentState)));
+    } catch (error) {
+      console.error("Failed to edit document:", error);
+    }
   }
 });
 
@@ -31,8 +39,14 @@ const DocumentEditor: React.FC = () => {
   useEffect(() => {
     documentSocket.emit('load-document');
     documentSocket.on('document', (documentContent: string) => {
-      const contentFromRaw = convertFromRaw(JSON.parse(documentContent));
-      setCurrentEditorState(EditorState.createWithContent(contentFromRaw));
+      try {
+        const contentFromRaw = convertFromRaw(JSON.parse(documentContent));
+        setCurrentEditorState(EditorState.createWithContent(contentFromRaw));
+      } catch (error) {
+        console.error("Error parsing document content:", error);
+        // Optionally, set the editor to a default/empty state if the document could not be loaded correctly
+        // setCurrentEditorState(EditorState.createEmpty());
+      }
     });
 
     return () => {
