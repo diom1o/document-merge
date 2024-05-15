@@ -15,6 +15,10 @@ interface UseDocumentManagerProps {
   onMergeError?: (error: any) => void;
 }
 
+interface Cache<T> {
+  [key: string]: T;
+}
+
 export const useDocumentManager = ({
   onConflict,
   onFetchError,
@@ -23,12 +27,19 @@ export const useDocumentManager = ({
 }: UseDocumentManagerProps) => {
   const [document, setDocument] = useState<Document>({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const documentCache: Cache<Document> = {}; // In-memory cache for documents
 
   const fetchDocument = async (id: string) => {
+    if (documentCache[id]) {
+      setDocument(documentCache[id]);
+      return;
+    }
+    
     setIsLoading(true);
     try {
       const response = await axios.get(`${API_BASE_URL}/documents/${id}`);
       setDocument(response.data);
+      documentCache[id] = response.data; // Cache the fetched document
     } catch (error) {
       onFetchError?.(error);
     } finally {
@@ -41,6 +52,9 @@ export const useDocumentManager = ({
     try {
       const response = await axios.post(`${API_BASE_URL}/documents`, doc);
       setDocument(response.data);
+      if (doc.id) {
+        documentCache[doc.id] = response.data; // Update the cache with the new document
+      }
     } catch (error) {
       onSaveError?.(error);
     } finally {
@@ -53,6 +67,7 @@ export const useDocumentManager = ({
     try {
       const response = await axios.patch(`${API_BASE_URL}/documents/${id}`, updates);
       setDocument(response.data);
+      documentCache[id] = response.data; // Update the cache after a successful merge
     } catch (error) {
       if (error.response?.status === 409) {
         onConflict?.();
