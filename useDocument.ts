@@ -15,9 +15,7 @@ interface UseDocumentManagerProps {
   onMergeError?: (error: any) => void;
 }
 
-interface Cache<T> {
-  [key: string]: T;
-}
+type Cache<T> = { [key: string]: T };
 
 export const useDocumentManager = ({
   onConflict,
@@ -29,58 +27,62 @@ export const useDocumentManager = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const documentCache: Cache<Document> = {}; // In-memory cache for documents
 
+  const handleApiCall = async (apiCall: () => Promise<any>, onSuccess: (data: Document) => void) => {
+    setIsLoading(true);
+    try {
+      const response = await apiCall();
+      onSuccess(response.data);
+    } catch (error) {
+      if (error.response?.status === 409) {
+        onConflict?.();
+      } else {
+        const errorHandler = error.config.method === 'get' ? onFetchError : error.config.method === 'post' ? onSaveError : onMergeError;
+        errorHandler?.(error);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const fetchDocument = async (id: string) => {
     if (documentCache[id]) {
       setDocument(documentCache[id]);
       return;
     }
     
-    setIsLoading(true);
-    try {
-      const response = await axios.get(`${API_BASE_URL}/documents/${id}`);
-      setDocument(response.data);
-      documentCache[id] = response.data; // Cache the fetched document
-    } catch (error) {
-      onFetchError?.(error);
-    } finally {
-      setIsLoading(false);
-    }
+    await handleApiCall(
+      () => axios.get<Document>(`${API_BASE_URL}/documents/${id}`),
+      (data: Document) => {
+        setDocument(data);
+        documentCache[id] = data; // Cache the fetched document
+      }
+    );
   };
 
   const saveDocument = async (doc: Document) => {
-    setIsLoading(true);
-    try {
-      const response = await axios.post(`${API_BASE_URL}/documents`, doc);
-      setDocument(response.data);
-      if (doc.id) {
-        documentCache[doc.id] = response.data; // Update the cache with the new document
+    await handleApiCall(
+      () => axios.post<Document>(`${API_BASE_URL}/documents`, doc),
+      (data: Document) => {
+        setDocument(data);
+        // Cache the document using its id if available
+        if (data.id) {
+          documentCache[data.id] = data;
+        }
       }
-    } catch (error) {
-      onSaveError?.(error);
-    } finally {
-      setIsLoading(false);
-    }
+    );
   };
 
   const mergeDocument = async (id: string, updates: Partial<Document>) => {
-    setIsLoading(true);
-    try {
-      const response = await axios.patch(`${API_BASE_URL}/documents/${id}`, updates);
-      setDocument(response.data);
-      documentCache[id] = response.data; // Update the cache after a successful merge
-    } catch (error) {
-      if (error.response?.status === 409) {
-        onConflict?.();
-      } else {
-        onMergeError?.(error);
+    await handleApiCall(
+      () => axios.patch<Document>(`${API_BASE_URL}/documents/${id}`, updates),
+      (data: Document) => {
+        setDocument(data);
+        documentCache[id] = data; // Update the cache after a successful merge
       }
-    } finally {
-      setIsLoading(false);
-    }
+    );
   };
 
-  useEffect(() => {
-  }, []);
-
+  // Note: The useEffect is removed since it's not being used.
+  
   return { document, isLoading, fetchDocument, saveDocument, mergeDocument };
 };
