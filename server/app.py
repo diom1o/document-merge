@@ -1,9 +1,9 @@
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import os
 from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
-import uuid  # for public id
+from werkzeug.security import generate_password_hash
+import uuid
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "my_precious_secret_key")
@@ -15,7 +15,8 @@ class User(db.Model):
     public_id = db.Column(db.String(50), unique=True)
     username = db.Column(db.String(50), unique=True)
     password = db.Column(db.String(80))
-    documents = db.relationship('Document', backref='author', lazy='dynamic')
+    documents = db.relationship('Document', backref='author', lazy=True)
+    shared_documents = db.relationship('SharedDocument', backref='shared_with', lazy=True)
 
 class Document(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -23,6 +24,12 @@ class Document(db.Model):
     content = db.Column(db.Text, nullable=False)
     version = db.Column(db.Integer, default=1)
     date_posted = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    shared_with_users = db.relationship('SharedDocument', backref='document', lazy=True)
+
+class SharedDocument(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey('document.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
 @app.before_first_request
@@ -65,6 +72,14 @@ def update_document(document_id):
     document.version += 1
     db.session.commit()
     return jsonify({'message': 'Document updated successfully'}), 200
+
+@app.route('/document/share', methods=['POST'])
+def share_document():
+    data = request.get_json()
+    shared_document = SharedDocument(document_id=data['document_id'], user_id=data['user_id'])
+    db.session.add(shared_document)
+    db.session.commit()
+    return jsonify({'message': 'Document shared successfully'}), 201
 
 if __name__ == "__main__":
     app.run(debug=True)
