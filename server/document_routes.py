@@ -5,10 +5,12 @@ from datetime import datetime
 import pymongo
 from bson.objectid import ObjectId
 import dotenv
+from flask_caching import Cache
 
 dotenv.load_dotenv()
 
 app = Flask(__name__)
+cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
 
 mongo_client = pymongo.MongoClient(os.getenv("MONGO_URI"))
 db = mongo_client.documentsDB
@@ -18,7 +20,14 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+def make_cache_key(*args, **kwargs):
+    path = request.path
+    args = str(hash(frozenset(request.args.items())))
+    return (path + args).encode('utf-8')
+
+
 @app.route("/documents/<doc_id>/versions/<version_id>", methods=["GET"])
+@cache.cached(timeout=60, key_prefix=make_cache_key)
 def get_version(doc_id, version_id):
     document = db.documents.find_one({"_id": ObjectId(doc_id), "versions.version_id": version_id})
     if document:
@@ -43,6 +52,7 @@ def upload_document_version(doc_id):
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         file.save(full_path)
         db.documents.update_one({"_id": ObjectId(doc_id)}, {"$push": {"versions": {"version_id": version_id, "path": file_path}}})
+        cache.delete_memoized(get_version, doc_id, version_id)
         return jsonify({"message": "Document version uploaded successfully", "version_id": version_id}), 201
 
 @app.route("/documents/<doc_id>/collaborate", methods=["POST"])
