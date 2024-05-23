@@ -2,82 +2,81 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import os
 from datetime import datetime
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "my_precious_secret_key")
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DATABASE_URI", "sqlite:///site.db")
+app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "default_secret_key")
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DATABASE_URI", "sqlite:///database.db")
 db = SQLAlchemy(app)
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     public_id = db.Column(db.String(50), unique=True)
     username = db.Column(db.String(50), unique=True)
-    password = db.Column(db.String(80))
-    documents = db.relationship('Document', backref='author', lazy=True)
-    shared_documents = db.relationship('SharedDocument', backref='shared_with', lazy=True)
+    password_hash = db.Column(db.String(80))
+    created_documents = db.relationship('Document', backref='author', lazy=True)
+    documents_shared_with_user = db.relationship('SharedDocument', backref='recipient', lazy=True)
 
 class Document(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
-    content = db.Column(db.Text, nullable=False)
-    version = db.Column(db.Integer, default=1)
-    date_posted = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    shared_with_users = db.relationship('SharedDocument', backref='document', lazy=True)
+    body = db.Column(db.Text, nullable=False)  
+    version_number = db.Column(db.Integer, default=1)  
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  
+    author_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  
 
 class SharedDocument(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey('document.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    target_doc_id = db.Column(db.Integer, db.ForeignKey('document.id'), nullable=False)  
+    recipient_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  
 
 @app.before_first_request
-def create_tables():
+def initialize_database():  
     db.create_all()
 
 @app.route('/user', methods=['POST'])
-def create_user():
-    data = request.get_json()
-    hashed_password = generate_password_hash(data['password'], method='sha256')
-    new_user = User(public_id=str(uuid.uuid4()), username=data['username'], password=hashed_password)
+def register_user():  
+    user_data = request.get_json()
+    password_hash = generate_password_hash(user_data['password'], method='sha256')
+    new_user = User(public_id=str(uuid.uuid4()), username=user_data['username'], password_hash=password_hash)
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({'message': 'New user created'}), 201
+    return jsonify({'message': 'User registered successfully'}), 201
 
 @app.route('/document', methods=['POST'])
-def create_document():
-    data = request.get_json()
-    new_document = Document(title=data['title'], content=data['content'], user_id=data['user_id'])
+def add_document():  
+    document_data = request.get_json()
+    new_document = Document(title=document_data['title'], body=document_data['content'], author_id=document_data['user_id'])
     db.session.add(new_document)
     db.session.commit()
-    return jsonify({'message': 'Document created successfully'}), 201
+    return jsonify({'message': 'Document added successfully'}), 201
 
 @app.route('/document/<int:document_id>', methods=['GET'])
-def get_document(document_id):
-    document = Document.query.filter_by(id=document_id).first()
+def fetch_document(document_id):  
+    document = Document.query.get(document_id)
     if not document:
-        return jsonify({'message': 'No document found'}), 404
-    document_data = {"title": document.title, "content": document.content, "version": document.version}
-    return jsonify({'document': document_data}), 200
+        return jsonify({'message': 'Document not found'}), 404
+    document_details = {"title": document.title, "body": document.body, "version": document.version_number}
+    return jsonify({'document': document_details}), 200
 
 @app.route('/document/<int:document_id>', methods=['PUT'])
-def update_document(document_id):
-    document = Document.query.filter_by(id=document_id).first()
+def modify_document(document_id):  
+    document = Document.query.get(document_id)
     if not document:
-        return jsonify({'message': 'No document found'}), 404
-    data = request.get_json()
-    document.title = data['title']
-    document.content = data['content']
-    document.version += 1
+        return jsonify({'message': 'Document not found'}), 404
+    document_updates = request.get_json()
+    document.title = document_updates['title']
+    document.body = document_updates['content']
+    document.version_number += 1
     db.session.commit()
     return jsonify({'message': 'Document updated successfully'}), 200
 
 @app.route('/document/share', methods=['POST'])
-def share_document():
-    data = request.get_json()
-    shared_document = SharedDocument(document_id=data['document_id'], user_id=data['user_id'])
-    db.session.add(shared_document)
+def share_document_with_user():  
+    share_details = request.get_json()
+    new_shared_document = SharedDocument(target_doc_id=share_details['document_id'], recipient_user_id=share_details['user_id'])
+    db.session.add(new_shared_document)
     db.session.commit()
     return jsonify({'message': 'Document shared successfully'}), 201
 
