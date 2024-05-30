@@ -28,10 +28,7 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-def make_cache_key(path: str, args: dict):
-    args_str = str(hash(frozenset(args.items())))
-    return (path + args_str).encode('utf-8')
-
+@cache.memoize(timeout=300)  # Increase cache duration to reduce DB reads
 def get_document_by_id(doc_id):
     try:
         return db.documents.find_one({"_id": ObjectId(doc_id)})
@@ -45,9 +42,15 @@ def get_version(doc_id, version_id):
     document = get_document_by_id(doc_id)
     
     if document:
-        for version in document["versions"]:
+        for version in document.get("versions", []):
             if version["version_id"] == version_id:
-                version_path = version["path"]
+                cache_key = f"version_path_{version_id}"
+                version_path = cache.get(cache_key)
+                
+                if not version_path:  # Cache miss, store path
+                    version_path = version["path"]
+                    cache.set(cache_key, version_path, timeout=3600)  # Cache for longer
+                
                 return send_from_directory(directory=UPLOAD_FOLDER, path=version_path, as_attachment=True)
     return jsonify({"error": "Document or version not found"}), 404
 
@@ -68,15 +71,25 @@ def upload_document_version(doc_id):
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         file.save(full_path)
         
+        # Directly use $push to update document to reduce extra DB call for existence check
         db.documents.update_one({"_id": ObjectId(doc_id)}, {"$push": {"versions": {"version_id": version_id, "path": file_path}}}, upsert=True)
         
+        # Delete cached document data to ensure fresh data on next access
+        cache.delete_memoized(get_document_by_id, doc_id)
         cache.delete_memoized(get_version, doc_id, version_id)
+        
         return jsonify({"message": "Document version uploaded successfully", "version_id": version_id}), 201
 
 @app.route("/documents/<doc_id>/collaborate", methods=["POST"])
 def collaborate_on_document(doc_id):
     content = request.json.get("content", "")
-    db.documents.update_one({"_id": ObjectId(doc_id)}, {"$set": {"content": content}}, upsert=True)
+    
+    # Update content without reading it first to save on DB operations
+    result = db.documents.update_one({"_id": ObjectId(doc_id)}, {"$set": {"content": content}}, upsert=True)
+    
+    if result.modified_count:
+        # Document content changed; invalidate cache
+        cache.delete_memoized(get_document_by_id, doc_id)
     
     return jsonify({"message": "Document updated in real-time"}), 200
 
