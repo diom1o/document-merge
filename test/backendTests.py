@@ -1,8 +1,9 @@
 import os
-import json
 import unittest
 import requests
 from dotenv import load_dotenv
+from functools import lru_cache
+
 load_dotenv()
 
 BASE_URL = os.getenv("API_BASE_URL")
@@ -12,10 +13,13 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+@lru_cache(maxsize=128)
+def cached_get_request(url, headers):
+    return requests.get(url, headers=headers)
 
 class TestAPIEndpoints(unittest.TestCase):
     def test_get_endpoint(self):
-        response = requests.get(f"{BASE_URL}/resource", headers=HEADERS)
+        response = cached_get_request(f"{BASE_URL}/resource", tuple(HEADERS.items()))
         self.assertEqual(response.status_code, 200)
 
     def test_post_endpoint(self):
@@ -45,8 +49,7 @@ class TestAPIEndpoints(unittest.TestCase):
             self.assertIn('type', response.json())
 
     def test_access_control(self):
-        no_auth_headers = {"Content-Type": "application/json"}
-        response = requests.get(f"{BASEURL}/protected-resource", headers=no_auth_headers)
+        response = cached_get_request(f"{BASE_URL}/protected-resource", tuple({"Content-Type": "application/json"}.items()))
         self.assertIn(response.status_code, [401, 403])
 
 
